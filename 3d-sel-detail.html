@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>3D Interaktif Sel Tumbuhan & Hewan</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Arial,sans-serif;background:#07111d;color:#fff}
+#app{width:100%;height:100%;position:relative}
+#scene{position:absolute;inset:0}
+#ui{position:absolute;top:0;left:0;right:0;z-index:5;padding:12px;pointer-events:none}
+h1{font-size:20px;margin:0 0 8px;text-align:center}
+#toolbar{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;pointer-events:auto}
+button{border:1px solid #6d849a;background:#132336;color:white;border-radius:10px;padding:9px 12px;font-weight:bold}
+button.active{background:#1767a8}
+#info{position:absolute;right:12px;top:92px;width:min(300px,calc(100% - 24px));background:rgba(5,15,27,.92);border:1px solid #55718c;border-radius:14px;padding:14px;display:none;z-index:10}
+#info h2{font-size:18px;margin:0 0 6px}
+#info p{font-size:14px;line-height:1.45;margin:5px 0}
+#close{position:absolute;right:8px;top:6px;background:none;border:0;font-size:20px;padding:2px}
+#hint{position:absolute;left:12px;bottom:14px;background:rgba(0,0,0,.55);padding:8px 11px;border-radius:10px;font-size:12px}
+#legend{position:absolute;left:12px;top:92px;background:rgba(5,15,27,.8);border:1px solid #40576c;border-radius:12px;padding:9px;font-size:12px;line-height:1.6}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+@media(max-width:600px){h1{font-size:17px}button{padding:8px 9px;font-size:12px}#legend{top:130px}#info{top:180px}}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="scene"></div>
+<div id="ui">
+<h1>🔬 3D Interaktif Sel</h1>
+<div id="toolbar">
+<button id="plant" class="active">🌿 Sel Tumbuhan</button>
+<button id="animal">🐾 Sel Hewan</button>
+<button id="reset">↻ Reset</button>
+<button id="labels">🏷 Label</button>
+</div>
+</div>
+<div id="legend">
+<div><span class="dot" style="background:#55d66b"></span>Membran / organel</div>
+<div><span class="dot" style="background:#d66cff"></span>Inti sel</div>
+<div><span class="dot" style="background:#ffd34e"></span>Organel khusus</div>
+</div>
+<div id="info">
+<button id="close">×</button>
+<h2 id="infoTitle"></h2>
+<p id="infoText"></p>
+<p><b>Fungsi:</b> <span id="infoFunction"></span></p>
+</div>
+<div id="hint">Geser dengan jari untuk memutar • Cubit untuk zoom • Ketuk organel untuk informasi</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+<script>
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x07111d);
+
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.1,1000);
+camera.position.set(0,0,15);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.getElementById("scene").appendChild(renderer.domElement);
+
+const hemi=new THREE.HemisphereLight(0xffffff,0x24364a,2.2);
+scene.add(hemi);
+const light=new THREE.DirectionalLight(0xffffff,2.5);
+light.position.set(6,8,10);scene.add(light);
+
+let cellGroup=new THREE.Group();
+scene.add(cellGroup);
+let clickable=[];
+let labels=[];
+let mode="plant";
+let showLabels=true;
+
+const info={
+"Membran Sel":["Membran Sel","Lapisan pembatas yang mengatur pertukaran zat antara sel dan lingkungan.","Mengontrol zat yang masuk dan keluar sel."],
+"Dinding Sel":["Dinding Sel","Lapisan kaku di luar membran sel pada tumbuhan.","Memberi bentuk, kekuatan, dan perlindungan."],
+"Sitoplasma":["Sitoplasma","Bagian seperti gel tempat organel berada.","Tempat berlangsungnya banyak reaksi metabolisme."],
+"Inti Sel":["Inti Sel","Organel yang menyimpan DNA dan mengatur aktivitas sel.","Mengendalikan aktivitas dan membawa informasi genetik."],
+"Nukleolus":["Nukleolus","Bagian di dalam inti sel yang tampak lebih padat.","Membantu pembentukan ribosom."],
+"Mitokondria":["Mitokondria","Organel penghasil energi berbentuk seperti kacang dengan lipatan membran.","Menghasilkan ATP melalui respirasi sel."],
+"Ribosom":["Ribosom","Partikel sangat kecil yang dapat tersebar di sitoplasma atau menempel pada RE kasar.","Tempat sintesis protein."],
+"RE Kasar":["Retikulum Endoplasma Kasar","Jaringan membran yang memiliki ribosom pada permukaannya.","Membantu sintesis dan transport protein."],
+"RE Halus":["Retikulum Endoplasma Halus","Jaringan membran tanpa ribosom.","Membantu sintesis lipid dan detoksifikasi."],
+"Badan Golgi":["Badan Golgi","Tumpukan kantong membran pipih.","Memodifikasi, mengemas, dan mengirim protein."],
+"Vakuola":["Vakuola","Ruang besar berisi cairan, terutama pada sel tumbuhan.","Menyimpan air, ion, pigmen, dan zat lain serta membantu tekanan turgor."],
+"Kloroplas":["Kloroplas","Organel hijau yang mengandung klorofil.","Tempat berlangsungnya fotosintesis."],
+"Lisosom":["Lisosom","Vesikel kecil berisi enzim pencerna.","Menguraikan zat dan bagian sel yang sudah rusak."],
+"Sentriol":["Sentriol","Struktur silindris yang berperan dalam organisasi mikrotubulus pada sel hewan.","Membantu pembelahan sel."]
+};
+
+function mat(color,opacity=1){
+return new THREE.MeshStandardMaterial({color,transparent:opacity<1,opacity,roughness:.55,metalness:.05,side:THREE.DoubleSide});
+}
+function sphere(name,pos,scale,color,opacity=1){
+let g=new THREE.SphereGeometry(1,32,20);
+let m=new THREE.Mesh(g,mat(color,opacity));
+m.position.set(...pos);m.scale.set(...scale);m.userData.name=name;
+cellGroup.add(m);clickable.push(m);return m;
+}
+function torus(name,pos,scale,color,rot=[0,0,0]){
+let g=new THREE.TorusGeometry(1,.18,12,32);
+let m=new THREE.Mesh(g,mat(color));
+m.position.set(...pos);m.scale.set(...scale);m.rotation.set(...rot);m.userData.name=name;
+cellGroup.add(m);clickable.push(m);return m;
+}
+function label(text,pos){
+const c=document.createElement("canvas"),ctx=c.getContext("2d");
+c.width=512;c.height=96;ctx.fillStyle="rgba(0,0,0,.7)";ctx.roundRect(4,4,504,88,18);ctx.fill();
+ctx.fillStyle="white";ctx.font="bold 30px Arial";ctx.textAlign="center";ctx.fillText(text,256,61);
+const tex=new THREE.CanvasTexture(c);
+const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+sp.position.set(...pos);sp.scale.set(2.7,.5,1);sp.userData.isLabel=true;cellGroup.add(sp);labels.push(sp);
+}
+
+function mitochondria(pos,rot=[0,0,0]){
+let g=new THREE.SphereGeometry(1,24,16);
+let m=new THREE.Mesh(g,mat(0xff9d35));m.position.set(...pos);m.scale.set(1.15,.48,.42);m.rotation.set(...rot);m.userData.name="Mitokondria";
+cellGroup.add(m);clickable.push(m);
+for(let i=-2;i<=2;i++){
+let line=new THREE.Mesh(new THREE.TorusGeometry(.2,.045,8,20),mat(0x8b421f));
+line.position.set(...pos);line.scale.set(.9,.9,.5);line.rotation.set(rot[0]+Math.PI/2,rot[1],rot[2]+i*.45);line.userData.name="Mitokondria";cellGroup.add(line);clickable.push(line);
+}
+}
+
+function golgi(pos){
+for(let i=0;i<5;i++){
+let g=new THREE.Mesh(new THREE.TorusGeometry(.65-i*.06,.12,10,30,Math.PI),mat(0xffc34d));
+g.position.set(pos[0],pos[1]+(i-2)*.18,pos[2]);g.rotation.x=Math.PI/2;g.scale.set(1,.7,1);
+g.userData.name="Badan Golgi";cellGroup.add(g);clickable.push(g);
+}
+}
+
+function clear(){
+scene.remove(cellGroup);cellGroup=new THREE.Group();scene.add(cellGroup);clickable=[];labels=[];
+}
+
+function buildCell(type){
+clear();mode=type;
+const isPlant=type==="plant";
+if(isPlant){
+sphere("Dinding Sel",[0,0,0],[5.2,3.8,3.5],0x55c878,.16);
+sphere("Membran Sel",[0,0,0],[4.8,3.45,3.15],0x42b9d6,.10);
+sphere("Sitoplasma",[0,0,0],[4.45,3.1,2.8],0x8bd8a0,.16);
+}else{
+sphere("Membran Sel",[0,0,0],[5,3.8,3.35],0x42b9d6,.18);
+sphere("Sitoplasma",[0,0,0],[4.6,3.4,3],0x7ccfa2,.14);
+}
+sphere("Inti Sel",[-.4,.1,.4],[1.35,1.25,1.25],0x9d5cff,.82);
+sphere("Nukleolus",[-.7,.25,1.25],[.4,.4,.4],0xffc4ff,.95);
+
+const mitoPos=isPlant?[[2.1,1.6,.6],[-2.3,-1.4,-.5],[2.2,-1.5,1.2],[-2.4,1.5,-1.2]]:[[2.1,1.4,.5],[-2.2,-1.4,-.6],[2.4,-1.5,1.1],[-2.2,1.5,-1.1],[.4,-2,.8]];
+mitoPos.forEach((p,i)=>mitochondria(p,[.3,i*.6,.5]));
+
+golgi([1.1,.1,2.0]);
+
+// RE kasar
+for(let i=0;i<5;i++){
+let t=new THREE.Mesh(new THREE.TorusGeometry(1.05,.08,10,36),mat(0x3f9dff));
+t.position.set(-1.9,-.1+i*.15,-1.0);t.rotation.set(Math.PI/2,.3,.2);t.scale.set(.9,.6,1);
+t.userData.name="RE Kasar";cellGroup.add(t);clickable.push(t);
+for(let j=0;j<4;j++){
+let r=sphere("Ribosom",[-2.55+j*.38,-.1+i*.15,-1.0], [.07,.07,.07],0xffffff);
+}
+}
+// RE halus
+for(let i=0;i<3;i++){
+let t=torus("RE Halus",[2.0,-.2+i*.25,-1.1],[.9,.55,1],0x52d6c5,[Math.PI/2,.2,0]);
+}
+
+// organel khusus
+if(isPlant){
+sphere("Vakuola",[1.1,-.8,-.3],[2.1,1.7,1.45],0x66b9ff,.28);
+for(const p of [[-3,2,.7],[-3,-1.9,1.1],[2.9,2,-.4],[3,-2,-.7]]){
+sphere("Kloroplas",p,[.72,.48,.38],0x63df55,.95);
+}
+}else{
+for(const p of [[2.9,2,-.3],[2.8,-2,.2],[-3,2,.1],[-3,-2,.7]]){
+sphere("Lisosom",p,[.35,.35,.35],0xff6b78,.9);
+}
+sphere("Sentriol",[.2,-2.3,-.2],[.75,.18,.18],0xffb14e,.95).rotation.z=.7;
+sphere("Sentriol",[.2,-2.3,-.2],[.75,.18,.18],0xffb14e,.95).rotation.z=-.7;
+}
+
+if(showLabels){
+label(isPlant?"Dinding Sel":"Membran Sel",[0,4.1,0]);
+label("Inti Sel",[-.4,1.55,.4]);
+label("Mitokondria",[2.1,2.2,.6]);
+if(isPlant){label("Kloroplas",[-3,2.55,.7]);label("Vakuola",[1.1,-2.65,-.3]);}
+else{label("Lisosom",[2.9,2.7,-.3]);label("Sentriol",[.2,-3.05,-.2]);}
+}
+cellGroup.scale.set(.9,.9,.9);
+}
+
+buildCell("plant");
+
+let down=false,lastX=0,lastY=0,rotX=0,rotY=0,dist=15;
+renderer.domElement.addEventListener("pointerdown",e=>{down=true;lastX=e.clientX;lastY=e.clientY});
+window.addEventListener("pointerup",()=>down=false);
+window.addEventListener("pointermove",e=>{
+if(!down)return;
+rotY+=(e.clientX-lastX)*.008;rotX+=(e.clientY-lastY)*.008;
+rotX=Math.max(-1.2,Math.min(1.2,rotX));lastX=e.clientX;lastY=e.clientY;
+});
+renderer.domElement.addEventListener("wheel",e=>{dist+=e.deltaY*.01;dist=Math.max(8,Math.min(24,dist))},{passive:true});
+
+let pinch=0;
+renderer.domElement.addEventListener("touchstart",e=>{
+if(e.touches.length===2)pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+},{passive:true});
+renderer.domElement.addEventListener("touchmove",e=>{
+if(e.touches.length===2){
+let n=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+dist-= (n-pinch)*.025;dist=Math.max(8,Math.min(24,dist));pinch=n;
+}
+},{passive:true});
+
+const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();
+renderer.domElement.addEventListener("click",e=>{
+mouse.x=e.clientX/innerWidth*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+ray.setFromCamera(mouse,camera);
+const hits=ray.intersectObjects(clickable);
+if(hits.length){
+let n=hits[0].object.userData.name;
+if(info[n]){
+document.getElementById("infoTitle").textContent=info[n][0];
+document.getElementById("infoText").textContent=info[n][1];
+document.getElementById("infoFunction").textContent=info[n][2];
+document.getElementById("info").style.display="block";
+}
+}
+});
+
+document.getElementById("plant").onclick=()=>{buildCell("plant");document.getElementById("plant").classList.add("active");document.getElementById("animal").classList.remove("active")};
+document.getElementById("animal").onclick=()=>{buildCell("animal");document.getElementById("animal").classList.add("active");document.getElementById("plant").classList.remove("active")};
+document.getElementById("reset").onclick=()=>{rotX=0;rotY=0;dist=15};
+document.getElementById("labels").onclick=()=>{
+showLabels=!showLabels;buildCell(mode);document.getElementById("labels").classList.toggle("active",showLabels);
+};
+document.getElementById("close").onclick=()=>document.getElementById("info").style.display="none";
+
+function animate(){
+requestAnimationFrame(animate);
+cellGroup.rotation.x=rotX;cellGroup.rotation.y=rotY;
+camera.position.z=dist;camera.lookAt(0,0,0);
+renderer.render(scene,camera);
+}
+animate();
+
+addEventListener("resize",()=>{
+camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
